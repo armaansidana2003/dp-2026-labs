@@ -1,0 +1,181 @@
+name: ML Security Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Fail fast: if any job fails, subsequent jobs are skipped
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB 1 — Data Validation
+  # ---------------------------------------------------------------------------
+  data-validation:
+    name: Data Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install data-validation dependencies
+        run: |
+          pip install --upgrade pip
+          pip install great-expectations cleanlab pandas numpy scikit-learn sentence-transformers
+
+      - name: Generate sample data (if not present)
+        run: |
+          if [ ! -f data/train.csv ]; then
+            python data/generate_sample_data.py
+          fi
+
+      - name: Run Great Expectations validation
+        run: python scripts/validate_data.py
+
+      - name: Check data integrity (SHA-256 manifest)
+        run: python scripts/check_data_integrity.py
+
+      - name: Upload validation artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-validation-results
+          path: |
+            data/manifest.json
+            ge_validation_result.json
+          if-no-files-found: ignore
+
+      - name: Notify Slack on failure
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"[ML Security] :x: Pipeline FAILED on \`${{ github.ref_name }}\` — job: data-validation (commit: ${{ github.sha }})\"}"
+
+  # ---------------------------------------------------------------------------
+  # JOB 2 — Model Validation
+  # ---------------------------------------------------------------------------
+  model-validation:
+    name: Model Validation
+    runs-on: ubuntu-latest
+    needs: data-validation
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install model-validation dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision modelscan safetensors numpy scikit-learn
+
+      - name: Create dummy model artifact (if not present)
+        run: |
+          if [ ! -f model.pt ]; then
+            python -c "
+          import torch, torch.nn as nn
+          model = nn.Sequential(nn.Linear(10, 64), nn.ReLU(), nn.Linear(64, 2))
+          torch.save(model.state_dict(), 'model.pt')
+          print('[CI] Dummy model.pt created for scanning.')
+          "
+          fi
+
+      - name: Scan model with ModelScan
+        run: python scripts/scan_model.py
+
+      - name: Run simplified Neural Cleanse check
+        run: python scripts/run_neural_cleanse.py
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-scan-results
+          path: |
+            modelscan_report.json
+            neural_cleanse_report.json
+          if-no-files-found: ignore
+
+      - name: Notify Slack on failure
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"[ML Security] :x: Pipeline FAILED on \`${{ github.ref_name }}\` — job: model-validation (commit: ${{ github.sha }})\"}"
+
+  # ---------------------------------------------------------------------------
+  # JOB 3 — Supply Chain Audit
+  # ---------------------------------------------------------------------------
+  supply-chain:
+    name: Supply Chain Audit
+    runs-on: ubuntu-latest
+    needs: model-validation
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install supply-chain tools
+        run: |
+          pip install --upgrade pip
+          pip install pip-audit pip-tools
+
+      - name: Run pip-audit and save JSON report
+        # Continue even if pip-audit finds issues — our script decides exit code
+        run: |
+          pip-audit --output json --format json -o audit_results.json || true
+
+      - name: Check audit results for HIGH/CRITICAL CVEs
+        run: python scripts/check_audit_results.py
+
+      - name: Verify model artifact HMAC signature
+        env:
+          MODEL_HMAC_SECRET: ${{ secrets.MODEL_HMAC_SECRET }}
+        run: python scripts/verify_model_signature.py
+
+      - name: Upload audit artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-results
+          path: |
+            audit_results.json
+            signature_verification.log
+          if-no-files-found: ignore
+
+      - name: Notify Slack on failure
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"[ML Security] :x: Pipeline FAILED on \`${{ github.ref_name }}\` — job: supply-chain (commit: ${{ github.sha }})\"}"
+
+      - name: Notify Slack on full pipeline success
+        if: success()
+        run: |
+          curl -s -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"[ML Security] :white_check_mark: All 3 security gates PASSED on \`${{ github.ref_name }}\` (commit: ${{ github.sha }})\"}"

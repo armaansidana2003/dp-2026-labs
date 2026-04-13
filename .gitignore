@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Generated outputs (students produce these locally)
+*.png
+*.html
+*.pt
+*.pth
+*.pkl
+*.safetensors
+*.wav
+data/
+.dvc_cache/
+mystery_model.pth
+malicious_model.pkl
+clean_model.*
+model_artifact.*
+audit_report.txt
+incident_report.txt
+trigger_visualization.png
+corpus.json
+manifest.json
+*.dvc
+requirements_pinned.txt
+audit_results.json
+pwned.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
