@@ -15,16 +15,6 @@ Fifteen hands-on labs covering the full data poisoning attack-defence lifecycle 
 - Git + DVC (Lab 8.2)
 - GitHub account (Lab 10.1)
 
-```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/data-poisoning-protection-labs.git
-cd data-poisoning-protection-labs
-
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-```
-
 ---
 
 ## Lab Index
